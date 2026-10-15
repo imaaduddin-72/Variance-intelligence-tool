@@ -1,0 +1,7 @@
+category,category_type,expected_direction,materiality_threshold_inr,risk_weight
+revenue,income,increase,50000,HIGH
+cogs,expense,decrease,50000,HIGH
+opex,expense,decrease,30000,MEDIUM
+headcount,metric,stable,0,MEDIUM
+capex,investment,stable,40000,MEDIUM
+working_capital,balance_sheet,stable,75000,HIGH
