@@ -25,6 +25,7 @@ WHAT THIS MODULE DOES, STEP BY STEP:
     6. Write all of this into variance_analysis table
 """
 
+import config
 from database import BudgetDatabase
 
 
@@ -84,7 +85,7 @@ def is_material(variance, threshold):
     return 1 if abs(variance) > threshold else 0
 
 
-def calc_variance_status(variance, expected_direction):
+def calc_variance_status(variance, expected_direction, budget=None):
     """
     Human-readable status used by commentary and reporting layers.
     Stable categories (headcount, working_capital) get "Deviation" /
@@ -94,7 +95,7 @@ def calc_variance_status(variance, expected_direction):
     if variance is None:
         return "On Plan"
     if expected_direction == "stable":
-        return "On Plan" if variance == 0 else "Deviation"
+        return "On Plan" if budget and abs(variance / budget) * 100 <= config.STABLE_TOLERANCE_PCT else "Deviation"
     if expected_direction == "increase":
         return "Favorable" if variance > 0 else "Unfavorable"
     # decrease (costs)
@@ -221,7 +222,8 @@ class VarianceCalculator:
             LEFT JOIN prior_year_actuals py
                 ON ba.category   = py.category
                 AND ba.subcategory = py.subcategory
-                AND SUBSTR(ba.period, 6) = SUBSTR(py.period, 6)
+                AND py.period = (CAST(SUBSTR(ba.period, 1, 4) AS INTEGER) - 1)
+                || '-' || SUBSTR(ba.period, 6)
             ORDER BY ba.period, ba.category, ba.subcategory
         """
 
@@ -254,7 +256,7 @@ class VarianceCalculator:
 
             material  = is_material(bv, threshold)
             favorable = is_favorable(bv, direction)
-            vstatus   = calc_variance_status(bv, direction)
+            vstatus   = calc_variance_status(bv, direction, budget)
 
             # ── INSERT EXPLANATION ────────────────────────────
             # INSERT OR REPLACE handles re-runs cleanly.

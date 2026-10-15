@@ -5,7 +5,7 @@ BUDGET VARIANCE - EXCEPTIONS COMMENTARY
 --- HIGH RISK ---
 
 [2024-06 | Revenue - Subscription Revenue]
-Subscription Revenue revenue fell short of budget by ₹60,933 (16.9%) in June 2024. This is an unfavorable variance, flagged as high priority for review. Compared to the same period last year, this is down 6.0%.
+Subscription Revenue revenue fell short of budget by ₹60,933 (16.9%) in June 2024. This is an unfavorable variance, flagged as high priority for review. Compared to the same period last year, this is down 8.9%.
 
 [2024-08 | Revenue - Product Sales]
 Product Sales revenue fell short of budget by ₹204,265 (23.9%) in August 2024. This is an unfavorable variance, flagged as high priority for review. Compared to the same period last year, this is down 17.0%.
@@ -17,25 +17,25 @@ Raw Materials costs exceeded budget by ₹103,665 (29.9%) in November 2024. This
 --- MEDIUM RISK ---
 
 [2024-01 | Headcount - Engineering]
-Engineering headcount was 1 below plan in January 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 8.0%.
+Engineering headcount was 1 below plan in January 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 12.5%.
 
 [2024-02 | Headcount - Engineering]
-Engineering headcount was 1 above plan in February 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 11.5%.
+Engineering headcount was 1 above plan in February 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 7.4%.
 
 [2024-03 | Headcount - Sales]
 Sales headcount was 1 above plan in March 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 14.3%.
 
 [2024-04 | Headcount - Engineering]
-Engineering headcount was 1 above plan in April 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 16.0%.
+Engineering headcount was 1 above plan in April 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 11.5%.
 
 [2024-04 | Headcount - Sales]
-Sales headcount was 1 above plan in April 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 14.3%.
+Sales headcount was 1 above plan in April 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 23.1%.
 
 [2024-06 | Headcount - Engineering]
-Engineering headcount was 1 above plan in June 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 15.4%.
+Engineering headcount was 1 above plan in June 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 20.0%.
 
 [2024-06 | Headcount - Sales]
-Sales headcount was 1 above plan in June 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 14.3%.
+Sales headcount was 1 above plan in June 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 23.1%.
 
 [2024-08 | Headcount - Engineering]
 Engineering headcount was 1 above plan in August 2024. This is a deviation from plan, flagged for routine review. Compared to the same period last year, this is up 20.0%.
