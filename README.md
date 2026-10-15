@@ -1,4 +1,4 @@
-# Variance-intelligence-tool.
+# Variance-intelligence-tool
 
 An automated FP&A variance analysis pipeline built in Python and SQLite.
 Replaces manual monthly Excel variance reporting with a 9-stage pipeline
