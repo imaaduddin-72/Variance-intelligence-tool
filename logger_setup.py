@@ -1,44 +1,11 @@
 """
 logger_setup.py
-================
+===============
+Provides get_logger(), which returns a logger that writes timestamped,
+levelled messages to both the console and a log file.
 
-PURPOSE: One function, get_logger(), that every module calls to get
-         a configured logger. Replaces scattered print() statements
-         with proper logging.
-
-WHY THIS MATTERS (print vs logging):
-
-    print() just dumps text to the screen. Once the terminal closes,
-    it's gone. If the pipeline runs unattended (Task Scheduler at
-    2am on the 1st of the month), nobody sees those prints.
-
-    logging:
-    - writes to BOTH the screen AND a file (pipeline.log)
-    - timestamps every line automatically
-    - has severity LEVELS (INFO, WARNING, ERROR) so you can filter
-      "show me only problems from last month" without scrolling
-      through every successful run
-    - the log file ACCUMULATES across runs - so you have a history
-      of every pipeline execution, which is exactly what you need
-      before the snapshot table even exists
-
-FINANCIAL ANALOGY:
-    print()  = talking out loud during month-end close - useful in
-               the moment, but no record afterward.
-    logging  = the close checklist that gets filed - dated, signed
-               off, and you can pull last month's to compare.
-
-HOW EVERY MODULE WILL USE THIS:
-
-    from logger_setup import get_logger
-    log = get_logger(__name__)
-
-    log.info("Loaded 414 rows")           # normal progress
-    log.warning("3 categories unmapped")  # not fatal, but notable
-    log.error("CSV file missing")         # something failed
-
-    __name__ is the module's own name (e.g. "database") - so every
-    log line shows WHICH module wrote it, automatically.
+Inputs:  module name (__name__) from the calling module
+Outputs: log lines on the console and in pipeline.log
 """
 
 import logging

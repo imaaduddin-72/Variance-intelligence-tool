@@ -1,48 +1,11 @@
 """
-Module 3.6: financial_risk.py
-==============================
+financial_risk.py
+=================
+Calculates revenue concentration risk, cash conversion cycle (DSO, DIO,
+DPO, CCC) and per-category volatility scores.
 
-PURPOSE: Three financial risk calculations that slot between
-         trend_analysis and commentary_generator in the pipeline:
-
-    1. concentration_risk    - revenue dependency per subcategory
-    2. cash_conversion_cycle - DSO, DIO, DPO and CCC per period
-    3. volatility_scoring    - STDEV and volatility_pct per category
-
-FINANCIAL ANALOGY:
-    trend_analysis answered: "how long has this problem persisted?"
-    financial_risk answers three CFO-level follow-up questions:
-
-    CONCENTRATION RISK (Treasury / Strategy):
-        "Are we dangerously dependent on one revenue stream?"
-        If 60% of revenue is product_sales and that channel disappears,
-        the whole business is at risk.  The 40 / 25 thresholds mirror
-        portfolio concentration limits used in fund management:
-        no single holding above 40% of NAV without a specific waiver.
-
-    CASH CONVERSION CYCLE (Working Capital / Treasury):
-        "How long is cash physically locked between paying suppliers
-         and collecting from customers?"
-        CCC = DSO + DIO - DPO.  Lower (even negative) is better.
-        A CCC of 45 days means each rupee is unavailable for 45 days.
-        Amazon's CCC is negative — customers pay before suppliers do.
-
-    VOLATILITY SCORING (FP&A / Risk):
-        "Which lines are hardest to budget and forecast reliably?"
-        High volatility_pct = wide confidence intervals on the forecast.
-        Low volatility_pct  = stable, predictable, low planning risk.
-
-WHY MANUAL STDEV (volatility_scoring)?
-    SQLite has no built-in STDEV() aggregate (unlike PostgreSQL/MySQL).
-    Population standard deviation via the computational formula:
-
-        σ = SQRT( AVG(x²) − AVG(x)² )
-
-    This is algebraically identical to the definitional form
-    SQRT( AVG( (x − mean)² ) ) but needs only ONE pass through the data
-    — no subquery to compute the mean first.  For ≤12 months per
-    category the difference between population σ and sample s is < 5%
-    and not material for FP&A purposes.
+Inputs:  budget_actuals table
+Outputs: risk results returned to the pipeline and logged to pipeline.log
 """
 
 import config

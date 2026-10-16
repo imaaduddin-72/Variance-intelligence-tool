@@ -1,13 +1,11 @@
 """
-Module 4: commentary_generator.py  (STATUS-AWARE VERSION)
-==========================================================
+commentary_generator.py
+=======================
+Generates plain-English commentary for material variances, worded
+according to each line's variance status.
 
-PURPOSE: Generate plain-English commentary for flagged variances.
-
-WHAT CHANGED: Commentary now uses variance_status (Favorable /
-Unfavorable / On Plan / Deviation) so stable categories like
-headcount get neutral "deviation from plan" language instead of
-being wrongly called "unfavorable".
+Inputs:  variance_analysis table
+Outputs: variance_commentary.txt
 """
 
 import config

@@ -1,16 +1,11 @@
 """
-Module 1: database.py
-======================
-Connects to SQLite, creates tables, loads CSVs.
+database.py
+===========
+Opens the SQLite database, creates the schema, and loads the source CSVs
+after checking they exist and have the expected columns.
 
-CHANGES IN THIS VERSION:
-- Uses config.py for all paths (no more hardcoded folders)
-- Validates CSVs exist BEFORE trying to load them
-- Wraps file/database operations in try/except with clear messages
-
-FINANCIAL ANALOGY: Like adding a checklist before month-end close -
-"are all source files present and in the right format?" - so you
-find out NOW, not halfway through the consolidation.
+Inputs:  source CSV files and paths from config.py
+Outputs: populated budget_actuals, prior_year_actuals, category_metadata tables
 """
 
 import sqlite3

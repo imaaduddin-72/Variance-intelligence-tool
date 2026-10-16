@@ -1,17 +1,11 @@
 """
-Module 3: report_generator.py
-==============================
+report_generator.py
+===================
+Builds the formatted Excel variance report with Summary, Detail and
+Flagged tabs.
 
-PURPOSE: Read variance_analysis from the database and produce a
-         formatted Excel workbook with three tabs:
-         1. Summary    -> executive overview
-         2. Detail      -> all rows, Excel Table (Power BI ready)
-         3. Flagged     -> material variances, sorted by risk
-
-CHANGES IN THIS VERSION:
-- Uses config.py for database and output paths
-- Checks variance_analysis has data before building the report
-- Handles file-save errors (e.g. Excel file open & locked)
+Inputs:  variance_analysis table
+Outputs: variance_report.xlsx
 """
 
 import config

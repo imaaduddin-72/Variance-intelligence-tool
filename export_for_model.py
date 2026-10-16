@@ -1,32 +1,11 @@
 """
 export_for_model.py
-====================
+===================
+Exports variance_analysis as a flat, unformatted table with stable column
+names for the forecast model and Power BI.
 
-PURPOSE: Export variance_analysis as a clean, flat dataset designed
-         to plug into:
-         1. Your existing EA Forecast Model (its Raw Data tab)
-         2. Power BI (as a direct table import)
-
-WHY A SEPARATE EXPORT (vs just using variance_report.xlsx):
-    The report workbook is formatted for HUMANS - merged title cells,
-    colors, multiple sheets. Models and BI tools want the opposite:
-    one rectangular table, no merged cells, no formatting, stable
-    column names, machine-friendly types.
-
-    FINANCIAL ANALOGY: the difference between a board pack (pretty,
-    for reading) and a GL extract (raw, for feeding other systems).
-    Never make one file do both jobs.
-
-DESIGN DECISIONS FOR MODEL COMPATIBILITY:
-    - snake_case column names that never change (formulas/queries
-      referencing them won't break on re-export)
-    - One row per period+category+subcategory (same grain as your
-      EA model's Raw Data tab)
-    - Flags as both 0/1 (is_material) AND text (variance_status) -
-      numeric for conditional logic, text for slicers/labels
-    - Dates kept as 'YYYY-MM' text plus a proper date column
-      (period_date) because Power BI builds time hierarchies
-      from real dates, not text
+Inputs:  variance_analysis table
+Outputs: model_feed.csv, model_feed.xlsx
 """
 
 import csv

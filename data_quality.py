@@ -1,29 +1,12 @@
 """
 data_quality.py
 ===============
+Runs five SQL integrity checks on the loaded data before any variance
+calculation begins. Stops the pipeline with a clear error message if
+any critical check fails.
 
-PURPOSE: Validate the loaded data BEFORE calculating anything.
-         Every check is pure SQL - this module is also your
-         SQL masterclass.
-
-FINANCIAL ANALOGY:
-    Before you build a consolidation, a good analyst checks:
-    - Do all entities have submissions? (completeness)
-    - Any duplicate journal lines? (integrity)
-    - Any cost centers not in the master mapping? (referential)
-    This module is that checklist, automated.
-
-WHY THIS MATTERS IN PRODUCTION:
-    Garbage in -> garbage out. A duplicate row silently doubles a
-    variance. A category missing from metadata silently gets default
-    rules. Production pipelines ALWAYS validate before calculating.
-
-EACH CHECK TEACHES A SQL PATTERN:
-    Check 1: COUNT + GROUP BY HAVING        (find duplicates)
-    Check 2: LEFT JOIN ... WHERE ... IS NULL (find orphans)
-    Check 3: COUNT(DISTINCT ...)             (coverage check)
-    Check 4: WHERE x IS NULL OR x < 0        (sanity ranges)
-    Check 5: GROUP BY + COUNT comparison     (period completeness)
+Inputs:  budget_actuals, prior_year_actuals, category_metadata tables
+Outputs: pass/fail result per check, logged to pipeline.log
 """
 
 import config

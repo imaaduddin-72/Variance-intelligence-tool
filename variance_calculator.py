@@ -1,28 +1,11 @@
 """
-Module 2: variance_calculator.py
-=================================
+variance_calculator.py
+======================
+Calculates budget and year-over-year variances (amount and %), applies
+materiality and favorability rules per category, and assigns a variance status.
 
-PURPOSE: Calculate budget and year-over-year variances, apply business
-         logic flags, and write results into the variance_analysis table.
-
-FINANCIAL ANALOGY:
-    Module 1 = Built the general ledger system (data storage)
-    Module 2 = The variance analysis engine (automated analyst)
-
-WHAT THIS MODULE DOES, STEP BY STEP:
-    1. Pull every row from budget_actuals
-    2. For each row, look up the same row in prior_year_actuals
-    3. Look up the category's business rules in category_metadata
-    4. Calculate:
-        - budget_variance       = actual - budget (₹)
-        - budget_variance_pct   = variance / budget × 100
-        - yoy_variance          = current actual - prior year actual (₹)
-        - yoy_variance_pct      = yoy_variance / prior actual × 100
-    5. Apply business logic:
-        - is_material?  abs(variance) > materiality threshold
-        - is_favorable? depends on category type (revenue up = good,
-                        cost up = bad)
-    6. Write all of this into variance_analysis table
+Inputs:  budget_actuals, prior_year_actuals, category_metadata tables
+Outputs: variance_analysis table
 """
 
 import config

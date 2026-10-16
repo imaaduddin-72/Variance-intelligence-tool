@@ -1,33 +1,13 @@
 """
 run_pipeline.py
 ===============
+Runs all nine pipeline stages in order (load, validate, calculate, trends,
+risk, commentary, report, export, snapshot), timing each and stopping on
+the first failure.
 
-PURPOSE: Run the entire variance analysis pipeline with ONE command:
-
-    python run_pipeline.py
-
-PIPELINE STAGES (in order, each depends on the previous):
-    1. LOAD       database.py            CSVs -> SQLite tables
-    2. VALIDATE   data_quality.py        SQL integrity checks
-    3. CALCULATE  variance_calculator.py one-pass SQL variance calc
-    4. TRENDS     trend_analysis.py      gaps-and-islands streak detection
-    5. RISK       financial_risk.py      concentration, CCC, volatility
-    6. COMMENT    commentary_generator.py plain-English narratives
-    7. REPORT     report_generator.py    formatted Excel board pack
-    8. EXPORT     export_for_model.py    flat feed for EA model/Power BI
-    9. SNAPSHOT   snapshot_manager.py    archive this run + diff vs last run
-
-PRODUCTION PATTERNS DEMONSTRATED HERE:
-    - Fail fast: if a stage fails, later stages don't run
-      (no point reporting on data that failed validation)
-    - Timing: each stage is timed, so you can spot slowdowns
-      as data grows
-    - Single entry point: one command for the whole monthly
-      refresh - this is what you'd schedule with Task Scheduler
-      to run automatically every month
-
-FINANCIAL ANALOGY: the month-end close checklist, automated.
-Each step signs off before the next begins.
+Inputs:  source CSV files and settings from config.py
+Outputs: budget_analysis.db, variance_report.xlsx, variance_commentary.txt,
+         model_feed.csv/.xlsx, pipeline.log
 """
 
 import sys

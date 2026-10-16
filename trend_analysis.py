@@ -1,50 +1,12 @@
 """
-Module 5: trend_analysis.py
-============================
+trend_analysis.py
+=================
+Finds the current streak of consecutive months with the same variance status
+for each category/subcategory, and flags 3+ month Unfavorable or Deviation
+streaks as chronic.
 
-PURPOSE: For each (category, subcategory) in variance_analysis, find
-         the CURRENT streak of consecutive months with the same
-         variance_status, ending at the most recent period.
-         Flag items that have been Unfavorable or Deviation for 3+
-         consecutive months as "chronic" issues needing escalation.
-
-FINANCIAL ANALOGY:
-    A standard month-end variance report shows ONE month in isolation:
-    "Revenue missed budget by ₹60K in May."  It says nothing about
-    whether that's a one-off blip or the fifth consecutive miss.
-
-    trend_analysis answers the question a CFO asks in the board review:
-    "Is this a new problem, or have we seen this three months running?"
-
-    A single-month miss = watch list.
-    Three consecutive misses = action required.
-    That threshold is what the is_chronic flag captures.
-
-NEW SQL CONCEPTS USED HERE:
-    1. LAG() window function
-           Look at the PREVIOUS row's value without a self-join.
-           Think of it as automatically pulling last month's column
-           from a comparative P&L, for every row at once.
-
-    2. Gaps and islands
-           The classic SQL pattern for finding consecutive runs in a
-           time series.  An "island" is a run of identical values.
-           A "gap" is where the value changes.
-
-    3. Running SUM() as island group ID
-           The central trick: take a running cumulative sum of a
-           boundary-flag column.  The sum stays flat inside a run
-           and increments exactly once at each boundary - producing
-           a unique integer for each consecutive island.
-
-    4. CTE chain (WITH ... AS ...)
-           Five CTEs, each one a small readable sub-step.  Same idea
-           as breaking a complex Excel formula across helper columns
-           instead of cramming everything into one cell.
-
-    5. INSERT INTO ... WITH ... SELECT
-           A CTE-backed INSERT: compute and write in one statement,
-           no intermediate Python loop needed.
+Inputs:  variance_analysis table
+Outputs: trend_analysis table
 """
 
 import config

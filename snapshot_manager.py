@@ -1,31 +1,11 @@
 """
 snapshot_manager.py
-====================
+===================
+Archives each run's variance_analysis into an append-only history and
+compares flagged items against the previous run (new, resolved, recurring).
 
-PURPOSE: After each pipeline run, save a timestamped copy of
-         variance_analysis into variance_snapshots (append-only
-         history), then compare THIS run's flagged items against
-         the PREVIOUS run's to answer:
-
-            "Is this the same issue as last month, or new?"
-
-FINANCIAL ANALOGY:
-    variance_analysis  = this month's working file (gets overwritten)
-    variance_snapshots = the dated archive folder (never overwritten)
-
-    The diff this module produces is like the "changes since last
-    review" memo - new issues, resolved issues, and ones that are
-    still outstanding (recurring).
-
-NEW SQL/PYTHON CONCEPTS HERE:
-    1. INSERT INTO ... SELECT  (again, but copying between tables -
-       same idiom as Module 2, different purpose: archiving)
-    2. uuid + datetime          (generating a unique run identifier
-       and a real timestamp - standard Python, used everywhere)
-    3. Set operations in Python (comparing two runs' flagged items
-       using set differences - new, set, -, & operators)
-    4. Window function: ROW_NUMBER() to find "the previous run"
-       without hardcoding a row count
+Inputs:  variance_analysis, variance_snapshots tables
+Outputs: new rows in variance_snapshots; run-over-run diff logged to pipeline.log
 """
 
 import uuid
