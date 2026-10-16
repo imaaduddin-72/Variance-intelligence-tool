@@ -26,27 +26,8 @@ class SnapshotManager:
     def save_snapshot(self):
         """
         Copy the current variance_analysis into variance_snapshots,
-        tagged with a unique run_id and timestamp.
-
-        SQL EXPLANATION:
-            INSERT INTO variance_snapshots (...)
-            SELECT <run_id>, <timestamp>, <columns...>
-            FROM variance_analysis
-
-            Same "INSERT INTO ... SELECT" pattern as Module 2 - but
-            instead of calculating new values, we copy existing rows
-            with two extra constant columns (run_id, run_timestamp)
-            stamped onto every row.
-
-        PYTHON CONCEPTS:
-            uuid.uuid4()  - generates a random unique ID, e.g.
-                            'a1b2c3d4-...' - guarantees this run's
-                            ID won't collide with any other run ever.
-            datetime.now(timezone.utc) - current UTC time. UTC avoids
-                            ambiguity if run from different timezones.
-            .isoformat()  - converts to a sortable string like
-                            '2026-06-12T15:30:00+00:00' - sorts
-                            correctly as TEXT in SQLite.
+        tagged with a UUID run_id and a UTC ISO-8601 timestamp
+        (sortable as text).
 
         Returns the run_id (string).
         """
@@ -82,32 +63,8 @@ class SnapshotManager:
 
     def get_previous_run_id(self, current_run_id):
         """
-        Find the run_id of the run BEFORE current_run_id.
-
-        SQL EXPLANATION - ROW_NUMBER() window function:
-
-            SELECT run_id, run_timestamp FROM (
-                SELECT run_id, run_timestamp,
-                       ROW_NUMBER() OVER (ORDER BY run_timestamp DESC) AS rn
-                FROM (SELECT DISTINCT run_id, run_timestamp FROM variance_snapshots)
-            )
-            WHERE rn = 2
-
-            Three layers, innermost first:
-              1. SELECT DISTINCT - collapse 414 rows-per-run down to
-                 ONE row per run_id (run_id+run_timestamp is constant
-                 across all 414 rows of a given run).
-              2. ROW_NUMBER() OVER (ORDER BY run_timestamp DESC) - on
-                 those collapsed run-rows, number them 1, 2, 3...
-                 by recency. Newest run = rn 1, previous run = rn 2.
-              3. WHERE rn = 2 - pick out just the previous run.
-
-            SQLite doesn't allow filtering on a window-function alias
-            in the SAME SELECT that defines it (the "rn = 2" filter
-            has to happen in an OUTER query) - that's why there are
-            three nested layers, not two.
-
-        Returns None if this is the first-ever run.
+        Return the run_id of the second most recent run (the one
+        before the run just saved), or None if this is the first run.
         """
         rows = self.db.execute_query("""
             SELECT run_id, run_timestamp FROM (
@@ -134,17 +91,6 @@ class SnapshotManager:
             RESOLVED  - flagged last time, not flagged now
             RECURRING - flagged in both runs (ongoing issue)
 
-        PYTHON CONCEPT - sets:
-            A "set" is a collection with no duplicates, supporting
-            mathematical operations:
-                current - previous   = items only in current  (NEW)
-                previous - current   = items only in previous (RESOLVED)
-                current & previous   = items in both           (RECURRING)
-
-            This is Excel's "items in List A not in List B" problem
-            (often solved with COUNTIF/VLOOKUP) - as a single
-            operator instead of a formula per row.
-
         Returns a dict with three lists, or None if there's no
         previous run to compare against.
         """
@@ -160,9 +106,6 @@ class SnapshotManager:
                 FROM variance_snapshots
                 WHERE run_id = ? AND is_material = 1
             """, (run_id,))
-            # Build a set of tuples - each tuple uniquely identifies
-            # one line item. Tuples (not lists) because sets require
-            # hashable elements - lists aren't hashable, tuples are.
             return {(r["period"], r["category"], r["subcategory"]) for r in rows}
 
         current_items = flagged_set(current_run_id)
@@ -188,10 +131,8 @@ class SnapshotManager:
 
     def print_diff_report(self, diff):
         """
-        Human-readable diff report for the terminal.
-
-        If diff is None (first run ever), say so clearly rather
-        than printing empty sections.
+        Print the run-over-run diff. A None diff means this is the
+        first run.
         """
         print("\n" + "=" * 65)
         print("CHANGES SINCE LAST RUN")
@@ -223,8 +164,8 @@ class SnapshotManager:
 
 def run_snapshot_stage(db: BudgetDatabase):
     """
-    Convenience function for run_pipeline.py - does the full
-    snapshot + diff in one call.
+    Pipeline entry point: save a snapshot and print the diff
+    against the previous run.
     """
     n = db.execute_query(
         "SELECT COUNT(*) AS n FROM variance_analysis")[0]["n"]

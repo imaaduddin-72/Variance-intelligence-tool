@@ -29,9 +29,7 @@ log = get_logger(__name__)
 
 
 def stage(title):
-    """Print a stage banner AND log it - banners are for the screen,
-    the log entry is what lets you grep pipeline.log for
-    'STAGE 3/6' across many historical runs."""
+    """Print a stage banner to the console and log the stage name."""
     print("\n" + "=" * 65)
     print(f"  {title}")
     print("=" * 65)
@@ -48,21 +46,10 @@ def run_pipeline():
         # ── STAGE 1: LOAD ────────────────────────────────────
         stage("STAGE 1/9 - LOAD DATA")
         t0 = time.time()
-        #
-        # IMPORTANT CHANGE: we used to delete budget_analysis.db
-        # entirely at the start of every run ("fresh slate"). But
-        # that ALSO destroyed variance_snapshots - the very history
-        # Stage 7 needs to compare against!
-        #
-        # New approach: db.create_schema() uses "CREATE TABLE IF
-        # NOT EXISTS", so it's safe to call on an existing database -
-        # it won't wipe variance_snapshots. load_csv_data() uses
-        # if_exists="replace" for the 3 input tables (budget_actuals
-        # etc.) and variance_calculator does "DELETE FROM
-        # variance_analysis" before recalculating - so the CURRENT
-        # data is still always fully refreshed. Only the APPEND-ONLY
-        # snapshots table survives across runs, which is exactly
-        # the point of it.
+        # The database is not deleted between runs so that
+        # variance_snapshots history is kept. Input tables are
+        # replaced on load and variance_analysis is rebuilt by the
+        # calculator, so current data is always fully refreshed.
         db.connect()
         db.create_schema()
         db.load_csv_data()
@@ -76,8 +63,6 @@ def run_pipeline():
         timings.append(("Validate", time.time() - t0))
 
         if not all_passed:
-            # Production decision: stop the pipeline on failed checks.
-            # Better no report than a wrong report.
             raise RuntimeError(
                 "Data quality checks failed - pipeline stopped. "
                 "Fix the issues above and re-run.")

@@ -25,11 +25,8 @@ class BudgetDatabase:
 
     def connect(self):
         """
-        Open the database connection.
-
-        ERROR HANDLING: sqlite3.connect() rarely fails outright, but
-        if the folder doesn't exist or there's a permissions issue,
-        we want a clear message instead of a raw traceback.
+        Open the database connection. Raises RuntimeError with the
+        path if the database cannot be opened.
         """
         try:
             self.conn = sqlite3.connect(self.db_path)
@@ -101,25 +98,10 @@ class BudgetDatabase:
         """)
 
         # ── SNAPSHOT HISTORY TABLE ─────────────────────────────
-        #
-        # PURPOSE: variance_analysis gets WIPED and rebuilt every
-        # pipeline run (DELETE + re-INSERT). That's correct for
-        # "current state" - but it means there's no history.
-        #
-        # variance_snapshots is the opposite: it NEVER gets wiped.
-        # Every pipeline run APPENDS a full copy of variance_analysis,
-        # tagged with run_timestamp and run_id.
-        #
-        # FINANCIAL ANALOGY: variance_analysis is this month's
-        # working file - you overwrite it each refresh. snapshots
-        # is the archived PDF you'd save to a dated folder every
-        # month, so you can always go back and see what last
-        # month's numbers said, even after this month overwrote them.
-        #
-        # NOTE: no UNIQUE constraint here - the same
-        # (period, category, subcategory) legitimately appears in
-        # MANY snapshots, once per run. run_id is what makes each
-        # snapshot's rows distinct.
+        # Append-only history: each pipeline run adds a full copy of
+        # variance_analysis tagged with run_id and run_timestamp.
+        # No UNIQUE constraint - the same (period, category,
+        # subcategory) appears once per run.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS variance_snapshots (
                 snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,12 +149,9 @@ class BudgetDatabase:
         """
         Load the three source CSVs into their tables.
 
-        ERROR HANDLING:
-        1. config.validate_input_files() checks all 3 CSVs exist
-           BEFORE we touch the database - fail fast with a clear list.
-        2. Each pd.read_csv() is wrapped so a malformed CSV (e.g.
-           wrong columns, corrupted file) gives a readable error
-           instead of a wall of pandas traceback.
+        Raises FileNotFoundError listing any missing CSVs, and
+        RuntimeError naming the file if a CSV is malformed or lacks
+        expected columns.
         """
         # ── Step 1: validate files exist ──────────────────────
         missing = config.validate_input_files()
@@ -246,7 +225,7 @@ if __name__ == "__main__":
         db.connect()
         db.create_schema()
         db.load_csv_data()
-        log.info("Module 1 ready")
+        log.info("Database ready")
     except (RuntimeError, FileNotFoundError) as e:
         log.error(str(e))
     finally:

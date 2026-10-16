@@ -72,8 +72,8 @@ def build_headline(row):
 
 def build_assessment(row):
     """
-    The "so what" sentence - now driven by variance_status, so
-    stable categories get neutral language.
+    Assessment sentence driven by variance_status and risk_level.
+    Stable categories get neutral "deviation" language.
     """
     status = row["variance_status"]
     risk   = row["risk_level"]
@@ -90,8 +90,6 @@ def build_assessment(row):
     elif status == "Unfavorable":
         return f"This is an unfavorable variance, {urgency}"
     elif status == "Deviation":
-        # Neutral language for stable categories - a deviation is
-        # worth looking at, but isn't inherently good or bad.
         return f"This is a deviation from plan, {urgency}"
     else:  # On Plan - rarely material, but handle it
         return f"This remains within the planned tolerance band, {urgency}"
@@ -215,7 +213,7 @@ if __name__ == "__main__":
                   f"{row['variance_status']}]")
             print(f"  {generate_commentary(row)}")
 
-        log.info("Module 4 complete")
+        log.info("Commentary generation complete")
     except RuntimeError as e:
         log.error(str(e))
     finally:

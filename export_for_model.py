@@ -22,9 +22,7 @@ log = get_logger(__name__)
 EXPORT_QUERY = """
     SELECT
         period,
-        -- period_date: first day of the month as a real date.
-        -- Power BI / Excel can build month/quarter/year hierarchies
-        -- from this; they can't from the text 'YYYY-MM'.
+        -- First day of the month, for date hierarchies in Power BI/Excel
         period || '-01'                AS period_date,
         category,
         subcategory,
@@ -66,12 +64,7 @@ class ModelFeedExporter:
 
     def export_csv(self, rows, path=None):
         """
-        CSV export - the most universal feed format.
-        Power BI, Excel Power Query, pandas, anything can read it.
-
-        PYTHON CONCEPT: csv.DictWriter writes dictionaries as rows,
-        using fieldnames to control column order. sqlite3.Row
-        supports dict() conversion, so the two snap together.
+        Write the feed as CSV with columns in COLUMNS order.
         """
         path = path or config.MODEL_FEED_CSV
         try:
@@ -86,14 +79,9 @@ class ModelFeedExporter:
 
     def export_xlsx(self, rows, path=None):
         """
-        Excel export - a single unformatted sheet whose data is an
-        Excel Table named 'ModelFeed'.
-
-        WHY A NAMED TABLE: your EA model can reference it as
-        ModelFeed[budget_variance] in formulas, or Power Query can
-        import the table by name - and the reference survives
-        re-exports even if row counts change. That's the glue
-        between this pipeline and your existing model.
+        Write the feed as a single unformatted sheet holding an Excel
+        Table named 'ModelFeed', so downstream formulas and Power Query
+        can reference it by name regardless of row count.
         """
         path = path or config.MODEL_FEED_XLSX
         wb = Workbook()

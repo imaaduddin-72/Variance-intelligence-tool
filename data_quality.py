@@ -28,13 +28,8 @@ class DataQualityChecker:
 
     def _record(self, name, passed, message, details=None):
         """
-        Store and log one check result.
-
-        PASS -> log.info  (normal, expected, goes to log but isn't
-                            visually alarming)
-        FAIL -> log.warning (something needs attention - this is the
-                              level you'd filter pipeline.log for to
-                              see "what went wrong last month")
+        Store and log one check result. Passes are logged at INFO,
+        failures at WARNING with up to five example rows.
         """
         if passed:
             log.info(f"{name}: {message}")
@@ -47,21 +42,11 @@ class DataQualityChecker:
 
     # ─────────────────────────────────────────────────────
     # CHECK 1: Duplicate rows
-    # SQL PATTERN: GROUP BY + HAVING COUNT(*) > 1
     # ─────────────────────────────────────────────────────
     def check_duplicates(self):
         """
-        A duplicate (period, category, subcategory) means the same
-        line item appears twice - variances would double-count.
-
-        SQL EXPLANATION:
-            GROUP BY collapses rows sharing the same 3 keys.
-            HAVING COUNT(*) > 1 keeps only groups with 2+ rows -
-            i.e., the duplicated keys.
-            (HAVING filters AFTER grouping; WHERE filters before.)
-
-        EXCEL ANALOGY: COUNTIFS(period, period, category, category,
-        subcategory, subcategory) > 1, then filter to TRUE.
+        Flag any (period, category, subcategory) key that appears
+        more than once - duplicates would double-count variances.
         """
         dupes = self.db.execute_query("""
             SELECT period, category, subcategory, COUNT(*) AS n
@@ -79,24 +64,11 @@ class DataQualityChecker:
 
     # ─────────────────────────────────────────────────────
     # CHECK 2: Orphan categories
-    # SQL PATTERN: LEFT JOIN ... WHERE right side IS NULL
     # ─────────────────────────────────────────────────────
     def check_orphan_categories(self):
         """
-        Find categories used in budget_actuals that have NO entry
-        in category_metadata - they'd silently get default rules.
-
-        SQL EXPLANATION:
-            LEFT JOIN keeps every row from the left table
-            (budget_actuals categories) and attaches the matching
-            metadata row if it exists - or NULL if it doesn't.
-            WHERE cm.category IS NULL keeps only the non-matches.
-
-            This "LEFT JOIN + IS NULL" idiom is THE standard SQL way
-            to ask: "what's in A but missing from B?"
-
-        EXCEL ANALOGY: VLOOKUP returning #N/A, then filtering
-        to just the #N/A rows.
+        Find categories used in budget_actuals that have no entry
+        in category_metadata - they would silently get default rules.
         """
         orphans = self.db.execute_query("""
             SELECT DISTINCT ba.category
@@ -117,16 +89,13 @@ class DataQualityChecker:
 
     # ─────────────────────────────────────────────────────
     # CHECK 3: Prior-year coverage
-    # SQL PATTERN: LEFT JOIN + IS NULL (again - it's everywhere)
     # ─────────────────────────────────────────────────────
     def check_prior_year_coverage(self):
         """
-        Which current line items have NO matching prior-year row?
-        YoY columns will be NULL for these - fine if expected
-        (new products), a data gap if not.
-
-        Note the SUBSTR month-matching - same trick as the
-        calculator uses, so this check tests the ACTUAL join logic.
+        Count current line items with no matching prior-year row.
+        YoY columns will be NULL for these - expected for new lines,
+        a data gap otherwise. Uses the same period join as
+        variance_calculator so it tests the real join logic.
         """
         missing = self.db.execute_query("""
             SELECT ba.period, ba.category, ba.subcategory
@@ -153,16 +122,11 @@ class DataQualityChecker:
 
     # ─────────────────────────────────────────────────────
     # CHECK 4: Value sanity
-    # SQL PATTERN: WHERE with OR'd conditions
     # ─────────────────────────────────────────────────────
     def check_value_sanity(self):
         """
-        Catch obviously broken values: NULL amounts, negative
-        budgets where they make no sense.
-
-        BUSINESS RULE: revenue/cost budgets should be >= 0.
-        (Working capital items can legitimately be negative,
-        so we exclude that category from the negativity check.)
+        Flag NULL amounts and negative budgets. Working capital is
+        excluded from the negativity rule since it can be negative.
         """
         bad = self.db.execute_query("""
             SELECT period, category, subcategory,
@@ -182,21 +146,12 @@ class DataQualityChecker:
 
     # ─────────────────────────────────────────────────────
     # CHECK 5: Period completeness
-    # SQL PATTERN: GROUP BY + comparing group counts
     # ─────────────────────────────────────────────────────
     def check_period_completeness(self):
         """
         Every period should have the same number of line items.
-        If June has 18 rows and every other month has 23, five
-        line items are missing from June.
-
-        SQL EXPLANATION:
-            First GROUP BY period to count rows per month, then
-            compare each month's count to the maximum. Months
-            below max are incomplete.
-
-        EXCEL ANALOGY: a pivot of row-counts by month - any month
-        whose count differs from the others sticks out.
+        Periods with fewer rows than the maximum are flagged as
+        incomplete.
         """
         per_period = self.db.execute_query("""
             SELECT period, COUNT(*) AS n
@@ -227,9 +182,6 @@ class DataQualityChecker:
     def run_all(self):
         """
         Run every check. Returns True if all passed.
-
-        Production behaviour: pipeline STOPS on critical failures
-        (duplicates, orphans) but only WARNS on coverage gaps.
         """
         log.info("Running data quality checks...")
         self.check_duplicates()

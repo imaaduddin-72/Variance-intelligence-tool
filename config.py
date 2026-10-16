@@ -2,22 +2,11 @@
 config.py
 =========
 
-PURPOSE: Single source of truth for all file paths and settings.
+Central configuration for file paths, business-rule defaults and
+tolerances. All pipeline modules read their settings from here.
 
-FINANCIAL ANALOGY:
-    Before this file, if you wanted to change where your CSVs live,
-    you'd have to edit database.py, hunt for the right line, and hope
-    you didn't miss one.
-
-    This is like having ONE "Assumptions" tab in a financial model that
-    everything else references - instead of hardcoding the same number
-    in 10 different formulas across 10 different sheets.
-
-HOW TO USE THIS FILE:
-    If you move your project folder, or rename your database, or want
-    output files saved somewhere else - change it HERE, once, and
-    every module (database.py, variance_calculator.py,
-    report_generator.py) automatically picks up the new value.
+Inputs:  none
+Outputs: path and setting constants; validate_input_files()
 """
 
 from pathlib import Path
@@ -25,12 +14,8 @@ from pathlib import Path
 # ─────────────────────────────────────────────────────────────
 # BASE DIRECTORY
 # ─────────────────────────────────────────────────────────────
-# Path(__file__) = location of THIS config.py file
-# .parent = the folder containing it
-#
-# This means: no matter where you copy this project folder
-# (Desktop, OneDrive, USB drive), all the paths below adjust
-# automatically because they're relative to config.py itself.
+# All paths are resolved relative to this file, so the project
+# folder can be moved without changing any settings.
 BASE_DIR = Path(__file__).resolve().parent
 
 
@@ -65,20 +50,14 @@ MODEL_FEED_XLSX        = BASE_DIR / "model_feed.xlsx"
 # For categories whose expected_direction = 'stable' (headcount,
 # working capital), favorable/unfavorable language doesn't apply.
 # Instead: within +/- this % of budget = "On Plan", outside = "Deviation".
-#
-# FINANCIAL ANALOGY: like a control band on a KPI dashboard -
-# headcount of 29 vs plan of 28 isn't "bad", it's within tolerance.
 STABLE_TOLERANCE_PCT = 2.0   # within ±2% of budget counts as On Plan
 
 
 # ─────────────────────────────────────────────────────────────
 # BUSINESS RULES (fallback defaults)
 # ─────────────────────────────────────────────────────────────
-# If category_metadata.csv is ever missing a category, these
-# defaults prevent the pipeline from crashing.
-#
-# FINANCIAL ANALOGY: "If a cost center isn't in our policy table,
-# treat it as low-risk / stable until someone classifies it properly."
+# Applied to any category missing from category_metadata.csv:
+# treated as stable and low-risk until it is classified.
 DEFAULT_MATERIALITY_THRESHOLD = 25000   # ₹
 DEFAULT_EXPECTED_DIRECTION    = "stable"
 DEFAULT_RISK_WEIGHT           = "LOW"
@@ -86,16 +65,10 @@ DEFAULT_RISK_WEIGHT           = "LOW"
 
 # ─────────────────────────────────────────────────────────────
 # VALIDATION
-# Run this at startup to catch missing files EARLY with a clear
-# message, instead of a confusing crash 50 lines into the script.
 # ─────────────────────────────────────────────────────────────
 def validate_input_files():
     """
-    Check that all required CSV files exist before we start.
-
-    FINANCIAL ANALOGY: Like checking all source files are saved
-    in the shared drive before you start building the consolidation -
-    catch the problem before you've wasted time halfway through.
+    Check that all required CSV files exist before loading.
 
     Returns a list of (label, path) tuples for missing files.
     Empty list = everything is fine.

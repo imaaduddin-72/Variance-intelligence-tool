@@ -297,12 +297,8 @@ class ReportGenerator:
     # ───────────────────────────────────────────────────────
     def save(self, filename=None):
         """
-        Save the workbook.
-
-        ERROR HANDLING: the most common real-world failure here is
-        "PermissionError: [Errno 13]" - which happens when the
-        output .xlsx is already open in Excel. We catch that
-        specifically and give an actionable message.
+        Save the workbook. Raises RuntimeError if the file is locked
+        (typically because it is open in Excel).
         """
         path = str(filename or config.REPORT_OUTPUT_PATH)
         try:
@@ -316,7 +312,7 @@ class ReportGenerator:
 
 
 # ─────────────────────────────────────────────────────────────
-# RUN MODULE 3
+# STANDALONE RUN
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -325,7 +321,6 @@ if __name__ == "__main__":
     try:
         db.connect()
 
-        # ── Pre-check: is there data to report on? ────────────
         row_count = db.execute_query(
             "SELECT COUNT(*) as n FROM variance_analysis"
         )[0]["n"]
@@ -343,7 +338,7 @@ if __name__ == "__main__":
         report.build_flagged_sheet()
         report.save()
 
-        log.info("Module 3 complete")
+        log.info("Report generation complete")
 
     except RuntimeError as e:
         log.error(str(e))

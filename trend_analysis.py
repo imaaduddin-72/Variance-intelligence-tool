@@ -18,13 +18,7 @@ log = get_logger(__name__)
 
 # ─────────────────────────────────────────────────────────────
 # POLICY CONSTANT
-#
-# How many consecutive adverse months before a streak is "chronic".
-# Stored here (not in config.py) because it's internal business
-# logic for this module only.
-#
-# FINANCIAL ANALOGY: a credit-risk policy rule - "flag any account
-# with 3+ consecutive late payments for escalation review."
+# Consecutive adverse months before a streak is flagged as chronic.
 # ─────────────────────────────────────────────────────────────
 CHRONIC_THRESHOLD = 3
 
@@ -32,31 +26,10 @@ CHRONIC_THRESHOLD = 3
 class TrendAnalyzer:
     """
     Identifies the current variance streak for every (category,
-    subcategory) line item using the SQL gaps-and-islands pattern.
-
-    GAPS AND ISLANDS - THE FULL CONCEPT:
-        Imagine 12 months of variance_status for one line item:
-
-          Jan   Feb   Mar   Apr   May   Jun   Jul   Aug   Sep   Oct   Nov   Dec
-          Unf   Unf   Fav   Fav   Fav   Unf   Unf   Unf   Unf   Unf   Fav   Fav
-          |-- island 1 --|  |--- island 2 ---|  |------ island 3 -----|  |- 4 -|
-
-        We want island 4 (the CURRENT streak ending at Dec), its
-        length (2 months), and its status (Favorable) - without
-        storing historical islands, using only SQL.
-
-    HOW THE RUNNING-SUM TRICK WORKS (step by step):
-        Step 1  LAG()       - for each row, peek at last month's status.
-        Step 2  is_boundary - flag rows where the status CHANGED (= 1)
-                              or stayed the same (= 0).
-        Step 3  SUM(OVER)   - running cumulative sum of boundary flags.
-                              Stays flat inside a run, increments at each
-                              boundary → every row in a run shares the
-                              same integer (island_id).
-        Step 4  latest_period - find the most recent month per line item.
-        Step 5  current_island - look up WHICH island_id that month has.
-        Step 6  COUNT(*)    - count all rows with that island_id
-                              = the current streak length.
+    subcategory) line item. A streak is the run of consecutive
+    periods ending at the latest period that share the same
+    variance_status; its length and status are written to
+    trend_analysis.
     """
 
     def __init__(self, db: BudgetDatabase):
@@ -64,52 +37,21 @@ class TrendAnalyzer:
 
     def calculate_streaks(self):
         """
-        Run the gaps-and-islands query and populate trend_analysis.
-
-        Structured as five CTEs so each logical step is readable
-        on its own.  The final SELECT aggregates the current island
-        into one output row per (category, subcategory).
-
+        Compute current streaks and rebuild trend_analysis.
         Returns the number of rows written.
         """
         self.db.conn.execute("DELETE FROM trend_analysis")
 
-        # ── INSERT ... WITH ... SELECT ────────────────────────
-        #
-        # SQLite supports CTEs directly inside an INSERT statement,
-        # so we compute and write in a single round-trip to the DB.
-        # The f-string embeds CHRONIC_THRESHOLD (a module constant
-        # integer, not user input) so there is no injection risk.
-        # ─────────────────────────────────────────────────────
+        # CHRONIC_THRESHOLD is a module constant, so the f-string
+        # interpolation below is safe.
         self.db.conn.execute(f"""
             INSERT INTO trend_analysis (
                 category, subcategory, current_status,
                 streak_length, is_chronic, latest_period, streak_direction
             )
 
-            -- ── CTE 1: ordered ──────────────────────────────────
-            -- Attach the PREVIOUS period's variance_status to each row
-            -- using LAG().
-            --
-            -- LAG(variance_status) OVER (PARTITION BY ... ORDER BY ...)
-            --
-            --   PARTITION BY category, subcategory
-            --       Each line item gets its own independent window.
-            --       (revenue, product_sales) January's "previous row"
-            --       is (revenue, product_sales) December, NOT the row
-            --       above it belonging to a different subcategory.
-            --
-            --   ORDER BY period
-            --       Defines the sequence within each partition.
-            --       'YYYY-MM' text sorts identically to date order,
-            --       so this is chronological without a CAST.
-            --
-            --   For the FIRST row in each partition (earliest period),
-            --   no previous row exists, so LAG() returns NULL.
-            --
-            -- FINANCIAL ANALOGY: a comparative P&L that automatically
-            -- shows "last month's value" in a column next to each row,
-            -- for every line item simultaneously.
+            -- ordered: previous period's status per line item
+            -- ('YYYY-MM' sorts chronologically; NULL for the first period)
             WITH ordered AS (
                 SELECT
                     category,
@@ -123,25 +65,8 @@ class TrendAnalyzer:
                 FROM variance_analysis
             ),
 
-            -- ── CTE 2: boundaries ────────────────────────────────
-            -- Mark rows where the variance_status CHANGED versus
-            -- the previous month.  These boundary flags drive the
-            -- island grouping in CTE 3.
-            --
-            --   is_boundary = 1  →  a new island starts here
-            --   is_boundary = 0  →  same island continues
-            --
-            -- Two conditions produce is_boundary = 1:
-            --   A) prev_status IS NULL  (first-ever period for this
-            --      line item; nothing to compare against, so it
-            --      starts its own island by definition)
-            --   B) variance_status != prev_status  (status flipped)
-            --
-            -- FINANCIAL ANALOGY: imagine marking the first month of
-            -- each new trend on a KPI dashboard.
-            --   Jan Unfav (new → flag=1), Feb Unfav (same → 0),
-            --   Mar Fav   (new → flag=1), Apr Fav   (same → 0).
-            -- The flags mark where each "run" begins.
+            -- boundaries: 1 where a new run starts (first period or
+            -- status changed), else 0
             boundaries AS (
                 SELECT
                     category,
@@ -157,34 +82,8 @@ class TrendAnalyzer:
                 FROM ordered
             ),
 
-            -- ── CTE 3: islands ───────────────────────────────────
-            -- Convert the boundary flags into island group IDs using
-            -- a running SUM() window function.
-            --
-            -- SUM(is_boundary) OVER (PARTITION BY ... ORDER BY period)
-            --
-            --   The cumulative sum increments by 1 at each boundary,
-            --   then stays flat until the next boundary.  Rows sharing
-            --   the same cumulative sum belong to the same island.
-            --
-            -- Concrete trace for one line item:
-            --
-            --   Period    Status        is_boundary  island_id (running sum)
-            --   2024-01   Unfavorable       1            1   <- boundary, sum +1
-            --   2024-02   Unfavorable       0            1   <- flat, same island
-            --   2024-03   Favorable         1            2   <- boundary, sum +1
-            --   2024-04   Favorable         0            2   <- flat, same island
-            --   2024-05   Unfavorable       1            3   <- boundary, sum +1
-            --   2024-06   Unfavorable       0            3   <- flat, same island
-            --   2024-07   Unfavorable       0            3   <- flat, same island
-            --
-            --   Island 3 now has three rows.  COUNT(*) WHERE island_id=3
-            --   gives the streak length: 3.
-            --
-            -- FINANCIAL ANALOGY: numbering each distinct "trend period"
-            -- on a rolling forecast.  Trend #1 = early growth phase,
-            -- Trend #2 = mid-year dip, Trend #3 = recovery.  All months
-            -- in Trend #3 share the number 3 no matter how long it runs.
+            -- islands: running sum of boundaries gives every row in
+            -- the same run a shared island_id
             islands AS (
                 SELECT
                     category,
@@ -198,18 +97,7 @@ class TrendAnalyzer:
                 FROM boundaries
             ),
 
-            -- ── CTE 4: latest_periods ────────────────────────────
-            -- Find the most recent period for each (category,
-            -- subcategory).  This anchors "current streak" - we want
-            -- the island that ENDS at the latest month, not islands
-            -- from months past.
-            --
-            -- MAX(period) works correctly because 'YYYY-MM' text sorts
-            -- in the same order as calendar dates.
-            --
-            -- FINANCIAL ANALOGY: the "as-of date" of the most recent
-            -- month-end close - the reference point for what "current"
-            -- means when we report.
+            -- latest_periods: most recent period per line item
             latest_periods AS (
                 SELECT
                     category,
@@ -219,22 +107,8 @@ class TrendAnalyzer:
                 GROUP BY category, subcategory
             ),
 
-            -- ── CTE 5: current_island ────────────────────────────
-            -- Join islands back to latest_periods to identify which
-            -- island_id the most recent period belongs to.
-            --
-            -- Joining on:
-            --   category + subcategory  (same line item)
-            --   period = latest_period  (pick only the latest row)
-            --
-            -- This produces ONE row per (category, subcategory),
-            -- carrying the island_id of the current streak.  The
-            -- final SELECT uses this island_id to filter islands
-            -- down to only the current streak's rows before counting.
-            --
-            -- FINANCIAL ANALOGY: looking up which trend number the
-            -- current month belongs to, so you know which rows to
-            -- count when you ask "how long has this trend been running?"
+            -- current_island: island_id of the latest period, i.e. the
+            -- current streak
             current_island AS (
                 SELECT
                     i.category,
@@ -248,33 +122,11 @@ class TrendAnalyzer:
                     AND i.period      = lp.latest_period
             )
 
-            -- ── FINAL SELECT: count the current island's rows ────
-            -- Join ALL islands rows to current_island, keeping only
-            -- those whose island_id matches the current streak's ID.
-            -- COUNT(*) on that filtered set = streak length.
-            --
-            -- is_chronic:
-            --     1 if the streak is BOTH long enough ({CHRONIC_THRESHOLD}+
-            --     months) AND an adverse status (Unfavorable or Deviation).
-            --     A long Favorable streak is good news, not a flag.
-            --     A two-month Unfavorable run is a watch item, not yet chronic.
-            --
-            -- GROUP BY i.variance_status is safe here because every row
-            -- in the current island shares the same status by definition
-            -- (it's what made them a single island in the first place).
-            --
-            -- FINANCIAL ANALOGY: the chronic flag is a credit-risk rule -
-            -- "escalate any line item that has missed its target for
-            -- {CHRONIC_THRESHOLD} or more consecutive months."
-            -- ── streak_direction ─────────────────────────────────
-            -- For each period in the current island, budget_variance
-            -- (actual - budget) tells us direction:
-            --   > 0  →  actual exceeded budget  (Over)
-            --   < 0  →  actual was below budget (Under)
-            -- MIN/MAX across all island rows detects mixing:
-            --   all positive → MIN > 0                  → 'Over'
-            --   all negative → MAX < 0                  → 'Under'
-            --   otherwise                               → 'Mixed'
+            -- streak_length: rows in the current island
+            -- is_chronic: streak of {CHRONIC_THRESHOLD}+ months that is
+            --   Unfavorable or Deviation
+            -- streak_direction: 'Over' if actual > budget in every month
+            --   of the streak, 'Under' if below in every month, else 'Mixed'
             SELECT
                 i.category,
                 i.subcategory,
@@ -319,11 +171,6 @@ class TrendAnalyzer:
     def summary_report(self):
         """
         Print chronic issues and streak distribution to the terminal.
-
-        FINANCIAL ANALOGY: the "persistent issues" section of a
-        monthly CFO memo - items that have appeared on the exceptions
-        list for multiple months running and need escalation, not
-        just routine monitoring.
         """
         print("\n" + "=" * 65)
         print("TREND ANALYSIS - STREAK SUMMARY")
@@ -334,9 +181,7 @@ class TrendAnalyzer:
         )[0]["n"]
         print(f"\nLine items tracked: {total}")
 
-        # ── Chronic issues ────────────────────────────────────
-        # Sorted longest streak first so the most entrenched problems
-        # appear at the top - the same order a CFO expects.
+        # ── Chronic issues (longest streak first) ─────────────
         chronic = self.db.execute_query("""
             SELECT category, subcategory, current_status,
                    streak_length, latest_period, streak_direction
@@ -363,9 +208,7 @@ class TrendAnalyzer:
         else:
             print("  None.")
 
-        # ── Streak distribution ───────────────────────────────
-        # Shows how statuses are spread across all line items at
-        # the current moment - the "state of the portfolio" view.
+        # ── Streak distribution by current status ─────────────
         print("\nCurrent streak distribution (all line items):")
         dist = self.db.execute_query("""
             SELECT
@@ -391,7 +234,6 @@ class TrendAnalyzer:
 
 # ─────────────────────────────────────────────────────────────
 # PIPELINE ENTRY POINT
-# Called by run_pipeline.py - mirrors run_snapshot_stage() pattern.
 # ─────────────────────────────────────────────────────────────
 
 def run_trend_stage(db: BudgetDatabase):
@@ -409,9 +251,7 @@ def run_trend_stage(db: BudgetDatabase):
 
 
 # ─────────────────────────────────────────────────────────────
-# STANDALONE TEST
-# Run directly with:  python trend_analysis.py
-# Requires variance_analysis to have been populated first.
+# STANDALONE RUN (requires a populated variance_analysis)
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -419,7 +259,7 @@ if __name__ == "__main__":
     try:
         db.connect()
         run_trend_stage(db)
-        log.info("Module 5 complete")
+        log.info("Trend analysis complete")
     except RuntimeError as e:
         log.error(str(e))
     finally:

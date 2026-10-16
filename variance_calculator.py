@@ -14,8 +14,6 @@ from database import BudgetDatabase
 
 # ─────────────────────────────────────────────────────────────
 # HELPER FUNCTIONS
-# Each does ONE clearly-named job.
-# Financial analogy: like named formulas in Excel (but reusable)
 # ─────────────────────────────────────────────────────────────
 
 def calc_variance(actual, budget):
@@ -31,7 +29,6 @@ def calc_variance(actual, budget):
 def calc_variance_pct(actual, budget):
     """
     Variance as a percentage of budget.
-    Financial analogy: the '% variance' column in every board pack.
     """
     if budget is None or budget == 0:
         return None
@@ -54,13 +51,10 @@ def calc_yoy_pct(current, prior):
 
 def is_material(variance, threshold):
     """
-    Should this variance be flagged for review?
+    Flag a variance whose absolute value exceeds the category's
+    materiality threshold.
 
-    FINANCIAL ANALOGY: The materiality threshold in your audit policy.
-    A ₹500 variance in a ₹10M revenue line isn't worth a CFO's time.
-    A ₹500 variance in a ₹2000 utilities budget IS worth flagging.
-
-    Returns: 1 (flag it) or 0 (ignore it)
+    Returns: 1 (material) or 0 (not material)
     """
     if variance is None or threshold is None:
         return 0
@@ -87,21 +81,10 @@ def calc_variance_status(variance, expected_direction, budget=None):
 
 def is_favorable(variance, expected_direction):
     """
-    Is this variance GOOD or BAD?
-
-    This is where business logic matters. The same sign means different
-    things for different categories:
-
-    REVENUE (expected: increase)
-        +₹50K variance = came in ABOVE target = FAVORABLE ✓
-        -₹50K variance = missed target = UNFAVORABLE ✗
-
-    COSTS: opex, cogs, capex (expected: decrease)
-        -₹50K variance = spent LESS than budget = FAVORABLE ✓
-        +₹50K variance = overspent = UNFAVORABLE ✗
-
-    HEADCOUNT, WORKING CAPITAL (expected: stable)
-        Any variance = worth investigating, not simply good/bad
+    Favorability depends on the category's expected direction:
+        increase (revenue):             positive variance is favorable
+        decrease (opex, cogs, capex):   negative variance is favorable
+        stable (headcount, working cap): only a zero variance is favorable
 
     Returns: 1 (favorable) or 0 (unfavorable)
     """
@@ -127,14 +110,8 @@ def is_favorable(variance, expected_direction):
 
 class VarianceCalculator:
     """
-    Reads raw data, calculates variances, writes results.
-
-    FINANCIAL ANALOGY: Like a senior analyst who:
-      - Opens the budget vs actual report
-      - Pulls last year's numbers alongside
-      - Applies the materiality policy
-      - Flags items that need attention
-      - Saves the annotated output
+    Reads budget, prior-year and metadata tables, calculates
+    variances and flags, and writes them to variance_analysis.
     """
 
     def __init__(self, db: BudgetDatabase):
@@ -143,16 +120,12 @@ class VarianceCalculator:
     def load_category_rules(self):
         """
         Load materiality thresholds and expected directions.
-        Returns a dict keyed by category name for fast lookups.
-
-        FINANCIAL ANALOGY: Loading your company's accounting policies —
-        the rulebook you apply when reviewing variances.
+        Returns a dict keyed by category name.
         """
         rows = self.db.execute_query(
             "SELECT category, expected_direction, materiality_threshold_inr, risk_weight "
             "FROM category_metadata"
         )
-        # Build a dict so we can look up rules by category in O(1)
         # e.g. rules["revenue"] → {expected_direction: "increase", ...}
         rules = {}
         for row in rows:
@@ -165,34 +138,17 @@ class VarianceCalculator:
 
     def calculate_all(self):
         """
-        Main entry point. Processes every row in budget_actuals.
-
-        WHAT HAPPENS:
-        1. Load category rules (once — efficient)
-        2. For each budget row, JOIN to prior year and metadata
-        3. Calculate all metrics
-        4. Insert into variance_analysis
+        Calculate variances for every row in budget_actuals and
+        rebuild variance_analysis.
         """
         print("Starting variance calculation...")
 
         rules = self.load_category_rules()
         print(f"  Loaded rules for {len(rules)} categories")
 
-        # ── SQL EXPLANATION ───────────────────────────────────
-        # This query does a LEFT JOIN between budget_actuals and
-        # prior_year_actuals.
-        #
-        # LEFT JOIN means: "give me every row from budget_actuals,
-        # and if there's a matching prior year row, include it.
-        # If not, give me NULL for prior year columns."
-        #
-        # The SUBSTR trick: periods are '2024-01' and '2023-01'.
-        # SUBSTR(period, 6) extracts just '01' (the month part),
-        # so January 2024 matches January 2023.
-        #
-        # FINANCIAL ANALOGY: This is the comparative P&L query:
-        # "Show me this year's actuals alongside last year's."
-        # ──────────────────────────────────────────────────────
+        # Match each line to the same month one year earlier
+        # ('2024-01' -> '2023-01'). LEFT JOIN keeps lines with no
+        # prior-year row; their prior_year_actual is NULL.
         query = """
             SELECT
                 ba.period,
@@ -231,8 +187,7 @@ class VarianceCalculator:
             threshold  = cat_rules.get("materiality_threshold", 0)
             risk       = cat_rules.get("risk_weight", "LOW")
 
-            # Calculate all metrics using our helper functions
-            bv      = calc_variance(actual, budget)
+            bv     = calc_variance(actual, budget)
             bv_pct  = calc_variance_pct(actual, budget)
             yoy     = calc_yoy_variance(actual, prior) if prior else None
             yoy_pct = calc_yoy_pct(actual, prior)      if prior else None
@@ -241,14 +196,6 @@ class VarianceCalculator:
             favorable = is_favorable(bv, direction)
             vstatus   = calc_variance_status(bv, direction, budget)
 
-            # ── INSERT EXPLANATION ────────────────────────────
-            # INSERT OR REPLACE handles re-runs cleanly.
-            # If a row for this period+category+subcategory exists,
-            # it replaces it. Otherwise it inserts new.
-            #
-            # The ? placeholders prevent SQL injection —
-            # Python fills them in safely from the tuple below.
-            # ──────────────────────────────────────────────────
             self.db.conn.execute("""
                 INSERT OR REPLACE INTO variance_analysis (
                     period, category, subcategory,
@@ -272,10 +219,7 @@ class VarianceCalculator:
 
     def summary_report(self):
         """
-        Quick sanity check after calculation.
-
-        FINANCIAL ANALOGY: The cover page of your variance report —
-        headline numbers before you dive into the detail.
+        Print headline counts and top variances after calculation.
         """
         print("\n" + "=" * 65)
         print("VARIANCE ANALYSIS SUMMARY")
@@ -353,7 +297,7 @@ class VarianceCalculator:
 
 
 # ─────────────────────────────────────────────────────────────
-# RUN MODULE 2
+# STANDALONE RUN
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -365,4 +309,4 @@ if __name__ == "__main__":
     calc.summary_report()
 
     db.close()
-    print("\n✓ Module 2 complete")
+    print("\n✓ Variance calculation complete")
