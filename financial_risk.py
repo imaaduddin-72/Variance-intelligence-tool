@@ -8,7 +8,6 @@ Inputs:  budget_actuals table
 Outputs: risk results returned to the pipeline and logged to pipeline.log
 """
 
-import config
 from database import BudgetDatabase
 from logger_setup import get_logger
 
@@ -200,14 +199,13 @@ class FinancialRiskAnalyzer:
         results = [dict(row) for row in rows]
 
         if results:
-            # Average CCC across all periods is the headline metric
-            avg_ccc = (
-                sum(r["ccc"] for r in results if r["ccc"] is not None)
-                / len(results)
-            )
+            # Average CCC across periods where it could be calculated
+            ccc_values = [r["ccc"] for r in results if r["ccc"] is not None]
+            avg_ccc = sum(ccc_values) / len(ccc_values) if ccc_values else None
+            avg_text = f"{avg_ccc:.1f} days" if avg_ccc is not None else "n/a"
             log.info(
                 f"Cash conversion cycle: {len(results)} periods, "
-                f"avg CCC = {avg_ccc:.1f} days"
+                f"avg CCC = {avg_text}"
             )
         else:
             log.info("Cash conversion cycle: no working_capital data found")
@@ -219,18 +217,22 @@ class FinancialRiskAnalyzer:
 
     def volatility_scoring(self):
         """
-        Population standard deviation and volatility_pct per category.
+        Month-to-month volatility of each line item's actuals.
 
-        SQLite has no STDEV aggregate, so σ is computed as
+        Measured per (category, subcategory) so that lines of different
+        size within a category are not pooled together. SQLite has no
+        STDEV aggregate, so population σ is computed as
         SQRT(AVG(x²) − AVG(x)²), clamped at 0 to absorb floating-point
         error. volatility_pct = σ / AVG(actual) × 100 (coefficient of
-        variation), so categories of different scale are comparable.
+        variation), so line items of different scale are comparable.
 
         Returns a list of dicts ordered by volatility_pct descending.
         """
         query = """
             SELECT
-                category,
+                ba.category,
+                ba.subcategory,
+                cm.category_type,
                 COUNT(*)                        AS data_points,
                 ROUND(AVG(actual_amount), 2)    AS avg_actual,
 
@@ -254,9 +256,11 @@ class FinancialRiskAnalyzer:
                     ) / NULLIF(AVG(actual_amount), 0) * 100, 2
                 )                               AS volatility_pct
 
-            FROM budget_actuals
+            FROM budget_actuals ba
+            LEFT JOIN category_metadata cm
+                ON ba.category = cm.category
             WHERE actual_amount IS NOT NULL
-            GROUP BY category
+            GROUP BY ba.category, ba.subcategory
             ORDER BY volatility_pct DESC
         """
 
@@ -267,9 +271,9 @@ class FinancialRiskAnalyzer:
             # Most volatile category is the headline risk signal
             top = results[0]
             log.info(
-                f"Volatility scoring: {len(results)} categories, "
-                f"highest = {top['category']} "
-                f"({top['volatility_pct']:.1f}%)"
+                f"Volatility scoring: {len(results)} line items, "
+                f"highest = {top['category']}/{top['subcategory']} "
+                f"({(top['volatility_pct'] or 0.0):.1f}%)"
             )
         else:
             log.info("Volatility scoring: no data found")
@@ -328,12 +332,12 @@ class FinancialRiskAnalyzer:
             )
 
         # ── Section 3: Volatility Scoring ────────────────────
-        print("\n[3] VOLATILITY SCORING (by category)")
+        print("\n[3] VOLATILITY SCORING (month-to-month, by line item)")
         print(
-            f"  {'Category':<20} {'Avg Actual':>14} "
-            f"{'Std Dev':>12} {'Volatility %':>13}"
+            f"  {'Category':<16} {'Subcategory':<22} {'Avg Actual':>12} "
+            f"{'Std Dev':>10} {'Volatility %':>13}"
         )
-        print("  " + "-" * 63)
+        print("  " + "-" * 78)
 
         vol_rows = self.volatility_scoring()
         for row in vol_rows:
@@ -344,11 +348,17 @@ class FinancialRiskAnalyzer:
                 vol_flag = "🟡"
             else:
                 vol_flag = "🟢"
+            # Headcount and other metrics are counts, not rupees
+            if row["category_type"] == "metric":
+                avg_text = f"{row['avg_actual']:,.1f}"
+                std_text = f"{row['std_dev']:,.1f}"
+            else:
+                avg_text = f"₹{row['avg_actual']:,.0f}"
+                std_text = f"₹{row['std_dev']:,.0f}"
             print(
-                f"  {row['category']:<20} "
-                f"₹{row['avg_actual']:>12,.0f}  "
-                f"₹{row['std_dev']:>10,.0f}  "
-                f"{vol_pct:>11.1f}%  {vol_flag}"
+                f"  {row['category']:<16} {row['subcategory']:<22} "
+                f"{avg_text:>12} {std_text:>10} "
+                f"{vol_pct:>12.1f}%  {vol_flag}"
             )
 
         print("\n" + "=" * 65)
@@ -369,7 +379,7 @@ def cash_conversion_cycle(db: BudgetDatabase):
 
 
 def volatility_scoring(db: BudgetDatabase):
-    """Standard deviation and volatility_pct per category. Returns list of dicts."""
+    """Month-to-month std dev and volatility_pct per line item. Returns list of dicts."""
     return FinancialRiskAnalyzer(db).volatility_scoring()
 
 
