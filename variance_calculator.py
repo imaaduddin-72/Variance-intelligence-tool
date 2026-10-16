@@ -10,6 +10,9 @@ Outputs: variance_analysis table
 
 import config
 from database import BudgetDatabase
+from logger_setup import get_logger
+
+log = get_logger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -20,31 +23,32 @@ def calc_variance(actual, budget):
     """
     Budget variance = actual minus budget.
     Positive = over budget (bad for costs, good for revenue).
+    A zero budget still yields a variance, so unbudgeted spend is visible.
     """
-    if budget is None or budget == 0:
+    if actual is None or budget is None:
         return None
     return round(actual - budget, 2)
 
 
 def calc_variance_pct(actual, budget):
     """
-    Variance as a percentage of budget.
+    Variance as a percentage of budget. None when budget is zero.
     """
-    if budget is None or budget == 0:
+    if actual is None or budget is None or budget == 0:
         return None
     return round(((actual - budget) / budget) * 100, 2)
 
 
 def calc_yoy_variance(current, prior):
     """Year-over-year change in absolute terms."""
-    if prior is None or prior == 0:
+    if current is None or prior is None:
         return None
     return round(current - prior, 2)
 
 
 def calc_yoy_pct(current, prior):
-    """Year-over-year growth percentage."""
-    if prior is None or prior == 0:
+    """Year-over-year growth percentage. None when prior is zero."""
+    if current is None or prior is None or prior == 0:
         return None
     return round(((current - prior) / prior) * 100, 2)
 
@@ -64,44 +68,30 @@ def is_material(variance, threshold):
 
 def calc_variance_status(variance, expected_direction, budget=None):
     """
-    Human-readable status used by commentary and reporting layers.
-    Stable categories (headcount, working_capital) get "Deviation" /
-    "On Plan" instead of "Favorable" / "Unfavorable" because a
-    headcount difference isn't inherently good or bad.
+    Status used by commentary and reporting layers:
+        increase (revenue):           Favorable if variance > 0, else Unfavorable
+        decrease (cogs, opex):        Favorable if variance < 0, else Unfavorable
+        stable (headcount, capex, working capital):
+            On Plan within ±STABLE_TOLERANCE_PCT of budget, else Deviation
+    A zero variance is always On Plan.
     """
-    if variance is None:
+    if variance is None or variance == 0:
         return "On Plan"
     if expected_direction == "stable":
-        return "On Plan" if budget and abs(variance / budget) * 100 <= config.STABLE_TOLERANCE_PCT else "Deviation"
+        within = budget and abs(variance / budget) * 100 <= config.STABLE_TOLERANCE_PCT
+        return "On Plan" if within else "Deviation"
     if expected_direction == "increase":
         return "Favorable" if variance > 0 else "Unfavorable"
     # decrease (costs)
     return "Favorable" if variance < 0 else "Unfavorable"
 
 
-def is_favorable(variance, expected_direction):
+def is_favorable(variance_status):
     """
-    Favorability depends on the category's expected direction:
-        increase (revenue):             positive variance is favorable
-        decrease (opex, cogs, capex):   negative variance is favorable
-        stable (headcount, working cap): only a zero variance is favorable
-
-    Returns: 1 (favorable) or 0 (unfavorable)
+    1 if the status is Favorable or On Plan, else 0 - kept consistent
+    with calc_variance_status so both flags always agree.
     """
-    if variance is None:
-        return 0
-
-    if expected_direction == "increase":
-        # Revenue: positive variance = good
-        return 1 if variance > 0 else 0
-
-    elif expected_direction == "decrease":
-        # Costs: negative variance = good (spent less)
-        return 1 if variance < 0 else 0
-
-    else:
-        # Stable (headcount, working capital): flag anything non-zero
-        return 1 if variance == 0 else 0
+    return 1 if variance_status in ("Favorable", "On Plan") else 0
 
 
 # ─────────────────────────────────────────────────────────────
@@ -141,10 +131,10 @@ class VarianceCalculator:
         Calculate variances for every row in budget_actuals and
         rebuild variance_analysis.
         """
-        print("Starting variance calculation...")
+        log.info("Starting variance calculation...")
 
         rules = self.load_category_rules()
-        print(f"  Loaded rules for {len(rules)} categories")
+        log.info(f"Loaded rules for {len(rules)} categories")
 
         # Match each line to the same month one year earlier
         # ('2024-01' -> '2023-01'). LEFT JOIN keeps lines with no
@@ -167,7 +157,7 @@ class VarianceCalculator:
         """
 
         rows = self.db.execute_query(query)
-        print(f"  Processing {len(rows)} rows...")
+        log.info(f"Processing {len(rows)} rows...")
 
         # Clear previous results so we can re-run safely
         self.db.conn.execute("DELETE FROM variance_analysis")
@@ -181,20 +171,20 @@ class VarianceCalculator:
             actual       = row["actual_amount"]
             prior        = row["prior_year_actual"]
 
-            # Get this category's rules (or empty dict if missing)
+            # Categories missing from metadata fall back to config defaults
             cat_rules = rules.get(category, {})
-            direction  = cat_rules.get("expected_direction", "stable")
-            threshold  = cat_rules.get("materiality_threshold", 0)
-            risk       = cat_rules.get("risk_weight", "LOW")
+            direction  = cat_rules.get("expected_direction", config.DEFAULT_EXPECTED_DIRECTION)
+            threshold  = cat_rules.get("materiality_threshold", config.DEFAULT_MATERIALITY_THRESHOLD)
+            risk       = cat_rules.get("risk_weight", config.DEFAULT_RISK_WEIGHT)
 
-            bv     = calc_variance(actual, budget)
+            bv      = calc_variance(actual, budget)
             bv_pct  = calc_variance_pct(actual, budget)
-            yoy     = calc_yoy_variance(actual, prior) if prior else None
-            yoy_pct = calc_yoy_pct(actual, prior)      if prior else None
+            yoy     = calc_yoy_variance(actual, prior)
+            yoy_pct = calc_yoy_pct(actual, prior)
 
             material  = is_material(bv, threshold)
-            favorable = is_favorable(bv, direction)
             vstatus   = calc_variance_status(bv, direction, budget)
+            favorable = is_favorable(vstatus)
 
             self.db.conn.execute("""
                 INSERT OR REPLACE INTO variance_analysis (
@@ -215,7 +205,7 @@ class VarianceCalculator:
             processed += 1
 
         self.db.conn.commit()
-        print(f"  ✓ Written {processed} rows to variance_analysis")
+        log.info(f"Written {processed} rows to variance_analysis")
 
     def summary_report(self):
         """
@@ -241,21 +231,26 @@ class VarianceCalculator:
             FROM variance_analysis
             WHERE is_material = 1
             GROUP BY category, risk_level
-            ORDER BY risk_level DESC, cnt DESC
+            ORDER BY CASE risk_level WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
+                     cnt DESC
         """)
 
         for row in rows:
             flag = "🔴" if row["risk_level"] == "HIGH" else "🟡"
             print(f"  {row['category']:<20} {row['cnt']:>15,}  {flag} {row['risk_level']}")
 
-        # ── Favorable vs Unfavorable breakdown ────────────────
-        print("\nFavorable vs unfavorable split:")
-        fav = self.db.execute_query(
-            "SELECT is_favorable, COUNT(*) as n FROM variance_analysis GROUP BY is_favorable"
-        )
-        for row in fav:
-            label = "Favorable ✓" if row["is_favorable"] else "Unfavorable ✗"
-            print(f"  {label:<20} {row['n']:>6,} rows")
+        # ── Variance status breakdown ─────────────────────────
+        print("\nVariance status split:")
+        split = self.db.execute_query("""
+            SELECT variance_status, COUNT(*) as n
+            FROM variance_analysis
+            GROUP BY variance_status
+            ORDER BY CASE variance_status
+                WHEN 'Favorable' THEN 1 WHEN 'On Plan' THEN 2
+                WHEN 'Unfavorable' THEN 3 ELSE 4 END
+        """)
+        for row in split:
+            print(f"  {row['variance_status']:<20} {row['n']:>6,} rows")
 
         # ── Biggest budget misses ─────────────────────────────
         print("\nTop 5 biggest unfavorable budget variances (all periods):")
@@ -265,7 +260,7 @@ class VarianceCalculator:
         top_misses = self.db.execute_query("""
             SELECT period, subcategory, budget_variance, risk_level
             FROM variance_analysis
-            WHERE is_favorable = 0
+            WHERE variance_status = 'Unfavorable'
             ORDER BY ABS(budget_variance) DESC
             LIMIT 5
         """)
@@ -301,12 +296,12 @@ class VarianceCalculator:
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    db = BudgetDatabase("budget_analysis.db")
-    db.connect()
-
-    calc = VarianceCalculator(db)
-    calc.calculate_all()
-    calc.summary_report()
-
-    db.close()
-    print("\n✓ Variance calculation complete")
+    db = BudgetDatabase()
+    try:
+        db.connect()
+        calc = VarianceCalculator(db)
+        calc.calculate_all()
+        calc.summary_report()
+        log.info("Variance calculation complete")
+    finally:
+        db.close()

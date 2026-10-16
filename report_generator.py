@@ -32,6 +32,7 @@ THIN_BORDER  = Border(bottom=Side(style="thin", color="CCCCCC"))
 
 FAVORABLE_FILL    = PatternFill("solid", fgColor="C6EFCE")
 UNFAVORABLE_FILL  = PatternFill("solid", fgColor="FFC7CE")
+DEVIATION_FILL    = PatternFill("solid", fgColor="FFEB9C")
 MATERIAL_FONT     = Font(bold=True, color="9C0006")
 
 CURRENCY_FMT = '₹#,##0'
@@ -91,32 +92,40 @@ class ReportGenerator:
             var_cell = ws.cell(row=row, column=4, value=r["total_variance"])
             var_cell.number_format = CURRENCY_FMT
 
-            pct = (r["total_variance"] / r["total_budget"]) if r["total_budget"] else 0
+            pct = ((r["total_variance"] or 0) / r["total_budget"]) if r["total_budget"] else 0
             ws.cell(row=row, column=5, value=pct).number_format = PCT_FMT
 
-            mat_cell = ws.cell(row=row, column=6, value=r["material_count"])
-            if r["material_count"] > 0:
+            material_count = r["material_count"] or 0
+            mat_cell = ws.cell(row=row, column=6, value=material_count)
+            if material_count > 0:
                 mat_cell.font = MATERIAL_FONT
 
             row += 1
 
         row += 2
-        ws.cell(row=row, column=1, value="Favorable vs Unfavorable (All Items)").font = LABEL_FONT
+        ws.cell(row=row, column=1, value="Variance Status (All Items)").font = LABEL_FONT
         row += 1
 
         split = self.db.execute_query("""
-            SELECT is_favorable, COUNT(*) AS n
+            SELECT variance_status, COUNT(*) AS n
             FROM variance_analysis
-            GROUP BY is_favorable
+            GROUP BY variance_status
         """)
-        split_map = {r["is_favorable"]: r["n"] for r in split}
+        split_map = {r["variance_status"]: r["n"] for r in split}
 
-        ws.cell(row=row, column=1, value="Favorable")
-        ws.cell(row=row, column=2, value=split_map.get(1, 0)).fill = FAVORABLE_FILL
+        status_fills = [
+            ("Favorable",   FAVORABLE_FILL),
+            ("On Plan",     None),
+            ("Unfavorable", UNFAVORABLE_FILL),
+            ("Deviation",   DEVIATION_FILL),
+        ]
+        for status, fill in status_fills:
+            ws.cell(row=row, column=1, value=status)
+            count_cell = ws.cell(row=row, column=2, value=split_map.get(status, 0))
+            if fill:
+                count_cell.fill = fill
+            row += 1
         row += 1
-        ws.cell(row=row, column=1, value="Unfavorable")
-        ws.cell(row=row, column=2, value=split_map.get(0, 0)).fill = UNFAVORABLE_FILL
-        row += 2
 
         ws.cell(row=row, column=1, value="High-Risk Material Variances").font = LABEL_FONT
         row += 1
@@ -211,8 +220,7 @@ class ReportGenerator:
         )
         ws.conditional_formatting.add(
             status_range,
-            CellIsRule(operator="equal", formula=['"Deviation"'],
-                       fill=PatternFill("solid", fgColor="FFEB9C"))
+            CellIsRule(operator="equal", formula=['"Deviation"'], fill=DEVIATION_FILL)
         )
 
         widths = [10, 14, 22, 14, 14, 14, 10, 14, 14, 10, 10, 12, 12, 60]
@@ -268,7 +276,9 @@ class ReportGenerator:
             var_cell.number_format = CURRENCY_FMT
             var_cell.font = MATERIAL_FONT
 
-            pct_cell = ws.cell(row=r_idx, column=7, value=r["budget_variance_pct"] / 100)
+            pct = r["budget_variance_pct"]   # None when budget is zero
+            pct_cell = ws.cell(row=r_idx, column=7,
+                               value=pct / 100 if pct is not None else "n/a")
             pct_cell.number_format = PCT_FMT
 
             risk_cell = ws.cell(row=r_idx, column=8, value=r["risk_level"])
@@ -276,7 +286,7 @@ class ReportGenerator:
                 risk_cell.fill = UNFAVORABLE_FILL
                 risk_cell.font = MATERIAL_FONT
             elif r["risk_level"] == "MEDIUM":
-                risk_cell.fill = PatternFill("solid", fgColor="FFEB9C")
+                risk_cell.fill = DEVIATION_FILL
 
             r_idx += 1
 
