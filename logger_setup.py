@@ -9,10 +9,27 @@ Outputs: log lines on the console and in pipeline.log
 """
 
 import logging
+import sys
 import config
 
 
 _configured = False  # prevents adding duplicate handlers
+
+
+def _make_console_utf8():
+    """
+    Console output uses ₹, ✓ and emoji. On Windows, redirected output
+    (Task Scheduler, files, pipes) defaults to cp1252 and would raise
+    UnicodeEncodeError, so switch stdout/stderr to UTF-8.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass  # stream replaced or already detached (e.g. under a test runner)
+
+
+_make_console_utf8()
 
 
 def get_logger(name):
