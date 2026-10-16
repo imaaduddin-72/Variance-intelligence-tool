@@ -11,7 +11,6 @@ Outputs: new rows in variance_snapshots; run-over-run diff logged to pipeline.lo
 import uuid
 from datetime import datetime, timezone
 
-import config
 from database import BudgetDatabase
 from logger_setup import get_logger
 

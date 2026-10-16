@@ -9,7 +9,6 @@ Inputs:  budget_actuals, prior_year_actuals, category_metadata tables
 Outputs: pass/fail result per check, logged to pipeline.log
 """
 
-import config
 from database import BudgetDatabase
 from logger_setup import get_logger
 
@@ -18,27 +17,29 @@ log = get_logger(__name__)
 
 class DataQualityChecker:
     """
-    Runs a suite of SQL validation checks. Each check returns
-    (passed: bool, message: str, detail_rows: list).
+    Runs a suite of SQL validation checks. Critical checks stop the
+    pipeline when they fail; non-critical checks only log a warning.
     """
 
     def __init__(self, db: BudgetDatabase):
         self.db = db
-        self.results = []   # collected (name, passed, message) tuples
+        self.results = []   # collected (name, passed, message, critical) tuples
 
-    def _record(self, name, passed, message, details=None):
+    def _record(self, name, passed, message, details=None, critical=True):
         """
         Store and log one check result. Passes are logged at INFO,
-        failures at WARNING with up to five example rows.
+        failures at WARNING (non-critical) or ERROR (critical) with up
+        to five example rows.
         """
         if passed:
             log.info(f"{name}: {message}")
         else:
-            log.warning(f"{name}: {message}")
+            report = log.error if critical else log.warning
+            report(f"{name}: {message}")
             if details:
                 for d in details[:5]:   # log at most 5 examples
-                    log.warning(f"  example: {dict(d)}")
-        self.results.append((name, passed, message))
+                    report(f"  example: {dict(d)}")
+        self.results.append((name, passed, message, critical))
 
     # ─────────────────────────────────────────────────────
     # CHECK 1: Duplicate rows
@@ -96,6 +97,7 @@ class DataQualityChecker:
         YoY columns will be NULL for these - expected for new lines,
         a data gap otherwise. Uses the same period join as
         variance_calculator so it tests the real join logic.
+        Non-critical: coverage below 90% is a warning only.
         """
         missing = self.db.execute_query("""
             SELECT ba.period, ba.category, ba.subcategory
@@ -117,7 +119,8 @@ class DataQualityChecker:
             "Prior-year coverage",
             passed=(pct >= 90),     # tolerate some gaps, flag big ones
             message=f"{covered}/{total} rows have prior-year match ({pct:.0f}%)",
-            details=missing
+            details=missing,
+            critical=False
         )
 
     # ─────────────────────────────────────────────────────
@@ -125,8 +128,9 @@ class DataQualityChecker:
     # ─────────────────────────────────────────────────────
     def check_value_sanity(self):
         """
-        Flag NULL amounts and negative budgets. Working capital is
-        excluded from the negativity rule since it can be negative.
+        Flag NULL amounts and negative budgets or actuals. Working
+        capital is excluded from the negativity rule since it can be
+        negative.
         """
         bad = self.db.execute_query("""
             SELECT period, category, subcategory,
@@ -134,7 +138,8 @@ class DataQualityChecker:
             FROM budget_actuals
             WHERE budget_amount IS NULL
                OR actual_amount IS NULL
-               OR (budget_amount < 0 AND category != 'working_capital')
+               OR ((budget_amount < 0 OR actual_amount < 0)
+                   AND category != 'working_capital')
         """)
 
         self._record(
@@ -181,7 +186,8 @@ class DataQualityChecker:
     # ─────────────────────────────────────────────────────
     def run_all(self):
         """
-        Run every check. Returns True if all passed.
+        Run every check. Returns True if no critical check failed
+        (non-critical failures are logged as warnings only).
         """
         log.info("Running data quality checks...")
         self.check_duplicates()
@@ -190,13 +196,16 @@ class DataQualityChecker:
         self.check_value_sanity()
         self.check_period_completeness()
 
-        failed = [name for name, passed, _ in self.results if not passed]
-        if failed:
-            log.warning(f"{len(failed)} check(s) failed: {', '.join(failed)}")
-        else:
+        critical = [name for name, passed, _, crit in self.results if not passed and crit]
+        warnings = [name for name, passed, _, crit in self.results if not passed and not crit]
+        if critical:
+            log.error(f"{len(critical)} critical check(s) failed: {', '.join(critical)}")
+        if warnings:
+            log.warning(f"{len(warnings)} non-critical check(s) failed: {', '.join(warnings)}")
+        if not critical and not warnings:
             log.info("All data quality checks passed")
 
-        return len(failed) == 0
+        return len(critical) == 0
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@ Inputs:  variance_analysis table
 Outputs: trend_analysis table
 """
 
-import config
 from database import BudgetDatabase
 from logger_setup import get_logger
 

@@ -64,7 +64,7 @@ def run_pipeline():
 
         if not all_passed:
             raise RuntimeError(
-                "Data quality checks failed - pipeline stopped. "
+                "Critical data quality checks failed - pipeline stopped. "
                 "Fix the issues above and re-run.")
 
         # ── STAGE 3: CALCULATE ───────────────────────────────

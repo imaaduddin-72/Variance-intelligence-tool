@@ -16,6 +16,25 @@ from logger_setup import get_logger
 log = get_logger(__name__)
 
 
+# Table -> (config attribute holding the source CSV path, columns loaded)
+INPUT_COLUMNS = {
+    "budget_actuals": (
+        "BUDGET_ACTUALS_CSV",
+        ["id", "period", "category", "subcategory",
+         "budget_amount", "actual_amount"],
+    ),
+    "prior_year_actuals": (
+        "PRIOR_YEAR_CSV",
+        ["id", "period", "category", "subcategory", "actual_amount"],
+    ),
+    "category_metadata": (
+        "CATEGORY_METADATA_CSV",
+        ["category", "category_type", "expected_direction",
+         "materiality_threshold_inr", "risk_weight"],
+    ),
+}
+
+
 class BudgetDatabase:
 
     def __init__(self, db_path=None):
@@ -41,6 +60,12 @@ class BudgetDatabase:
 
     def create_schema(self):
         cursor = self.conn.cursor()
+
+        # Input tables are reloaded from CSV every run. Recreate them so
+        # databases built by older versions (which replaced these tables
+        # via pandas and lost their constraints) get the declared schema.
+        for table in INPUT_COLUMNS:
+            cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS budget_actuals (
@@ -135,25 +160,25 @@ class BudgetDatabase:
         """)
 
         # Migration: add streak_direction to pre-existing databases
-        try:
+        existing = {r[1] for r in cursor.execute("PRAGMA table_info(trend_analysis)")}
+        if "streak_direction" not in existing:
             cursor.execute(
                 "ALTER TABLE trend_analysis ADD COLUMN streak_direction TEXT"
             )
-        except Exception:
-            pass  # column already exists
 
         self.conn.commit()
         log.info("Schema ready")
 
     def load_csv_data(self):
         """
-        Load the three source CSVs into their tables.
+        Load the three source CSVs into their tables. Call
+        create_schema() first: rows are appended into the declared
+        tables so UNIQUE and NOT NULL constraints are enforced.
 
         Raises FileNotFoundError listing any missing CSVs, and
-        RuntimeError naming the file if a CSV is malformed or lacks
-        expected columns.
+        RuntimeError naming the file if a CSV is malformed, lacks
+        expected columns, or contains duplicate keys.
         """
-        # ── Step 1: validate files exist ──────────────────────
         missing = config.validate_input_files()
         if missing:
             lines = "\n".join(f"  - {label}: {path}" for label, path in missing)
@@ -162,49 +187,27 @@ class BudgetDatabase:
                 f"Check that these files are in: {config.DATA_DIR}"
             )
 
-        # ── Step 2: load budget_actuals ───────────────────────
-        try:
-            df_budget = pd.read_csv(config.BUDGET_ACTUALS_CSV)
-            expected = {"id", "period", "category", "subcategory",
-                        "budget_amount", "actual_amount"}
-            if not expected.issubset(df_budget.columns):
-                raise ValueError(
-                    f"budget_actuals.csv is missing expected columns. "
-                    f"Found: {list(df_budget.columns)}"
+        for table, (path_setting, columns) in INPUT_COLUMNS.items():
+            path = getattr(config, path_setting)
+            try:
+                df = pd.read_csv(path)
+                absent = [c for c in columns if c not in df.columns]
+                if absent:
+                    raise ValueError(
+                        f"missing expected column(s) {absent}. "
+                        f"Found: {list(df.columns)}"
+                    )
+                self.conn.execute(f"DELETE FROM {table}")
+                df[columns].to_sql(table, self.conn, if_exists="append", index=False)
+                log.info(f"{table}: {len(df)} rows")
+            except sqlite3.IntegrityError as e:
+                self.conn.rollback()
+                raise RuntimeError(
+                    f"Failed loading {path.name}: duplicate or missing key values ({e})"
                 )
-            df_budget.to_sql("budget_actuals", self.conn, if_exists="replace", index=False)
-            log.info(f"budget_actuals: {len(df_budget)} rows")
-        except Exception as e:
-            raise RuntimeError(f"Failed loading budget_actuals.csv: {e}")
-
-        # ── Step 3: load prior_year_actuals ───────────────────
-        try:
-            df_prior = pd.read_csv(config.PRIOR_YEAR_CSV)
-            expected = {"id", "period", "category", "subcategory", "actual_amount"}
-            if not expected.issubset(df_prior.columns):
-                raise ValueError(
-                    f"prior_year_data.csv is missing expected columns. "
-                    f"Found: {list(df_prior.columns)}"
-                )
-            df_prior.to_sql("prior_year_actuals", self.conn, if_exists="replace", index=False)
-            log.info(f"prior_year_actuals: {len(df_prior)} rows")
-        except Exception as e:
-            raise RuntimeError(f"Failed loading prior_year_data.csv: {e}")
-
-        # ── Step 4: load category_metadata ────────────────────
-        try:
-            df_meta = pd.read_csv(config.CATEGORY_METADATA_CSV)
-            expected = {"category", "category_type", "expected_direction",
-                        "materiality_threshold_inr", "risk_weight"}
-            if not expected.issubset(df_meta.columns):
-                raise ValueError(
-                    f"category_metadata.csv is missing expected columns. "
-                    f"Found: {list(df_meta.columns)}"
-                )
-            df_meta.to_sql("category_metadata", self.conn, if_exists="replace", index=False)
-            log.info(f"category_metadata: {len(df_meta)} rows")
-        except Exception as e:
-            raise RuntimeError(f"Failed loading category_metadata.csv: {e}")
+            except Exception as e:
+                self.conn.rollback()
+                raise RuntimeError(f"Failed loading {path.name}: {e}")
 
         self.conn.commit()
 
