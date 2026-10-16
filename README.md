@@ -33,13 +33,17 @@ analysis regenerates automatically.
 
 ## Key findings from illustrative data
 
-- product_sales represents 45.4% of total revenue — HIGH concentration risk
-- Cash conversion cycle averages 14.3 days — healthy and improving over time
-- OpEx is the hardest category to forecast (91.3% month-to-month volatility)
-- 6 line items show 18-month deviation streaks in CapEx and working capital,
-  suggesting the budget baseline is wrong rather than execution being off
-- COGS raw materials has been consistently over budget since March 2025 —
-  the most immediately actionable finding
+- product_sales averages 45.4% of total revenue (38.9%–48.1% by month) —
+  HIGH concentration risk in 17 of 18 months
+- Cash conversion cycle averages 14.3 days and stays within 12–17 days
+  every month — healthy and stable
+- Professional fees is the hardest line to forecast (21.1% month-to-month
+  volatility); every other line item is below 14%
+- COGS shipping has been over budget for 4 consecutive months
+  (Mar–Jun 2025) and is flagged as chronic — the most actionable finding
+- Engineering headcount has deviated from plan for 3 consecutive months
+- 5 material variances in total; the largest is a ₹204K product_sales
+  shortfall in August 2024
 
 ---
 
@@ -49,13 +53,13 @@ analysis regenerates automatically.
 |-------|--------|--------------|
 | 1 | database.py | Load CSVs into SQLite |
 | 2 | data_quality.py | 5 automated data integrity checks |
-| 3 | variance_calculator.py | SQL variance calculation, one INSERT per row |
-| 3.5 | trend_analysis.py | LAG() window function streak detection |
-| 3.6 | financial_risk.py | Concentration, liquidity, and volatility metrics |
-| 4 | commentary_generator.py | Auto-generated plain-English narratives |
-| 5 | report_generator.py | Formatted Excel board pack |
-| 6 | export_for_model.py | Power BI and EA model feed |
-| 7 | snapshot_manager.py | Run history and diff vs last run |
+| 3 | variance_calculator.py | Budget and YoY variances, materiality and status flags |
+| 4 | trend_analysis.py | LAG() window function streak detection |
+| 5 | financial_risk.py | Concentration, liquidity, and volatility metrics |
+| 6 | commentary_generator.py | Auto-generated plain-English narratives |
+| 7 | report_generator.py | Formatted Excel board pack |
+| 8 | export_for_model.py | Power BI and EA model feed |
+| 9 | snapshot_manager.py | Run history and diff vs last run |
 
 ---
 
@@ -64,28 +68,32 @@ analysis regenerates automatically.
 Before calculating anything, the pipeline runs 5 checks on the raw data.
 If any critical check fails, the pipeline stops immediately with a clear
 error message rather than producing a report with wrong numbers.
+Check 3 is non-critical: it logs a warning but lets the run continue.
 
-**1. No duplicate rows**
+**1. No duplicate rows** (critical)
 Checks that the same line item does not appear twice in the same month.
-A duplicate row would silently double the variance for that item.
+A duplicate row would silently double the variance for that item. The
+input tables also enforce this with UNIQUE constraints, so a CSV with
+duplicate keys is rejected at load time with a clear error.
 
-**2. All categories have business rules**
+**2. All categories have business rules** (critical)
 Every category in the data (revenue, opex, etc.) must have a matching
 entry in the metadata file that defines its rules — materiality threshold,
 expected direction, risk level. Missing entries would silently get default
 rules instead of the correct ones.
 
-**3. Prior year data exists for every current line item**
+**3. Prior year data exists for current line items** (warning only)
 Every current-year row needs a matching prior-year row to calculate
 year-over-year growth. Rows without a match produce blank YoY columns.
-This check catches that before it becomes a silent gap in the report.
+A warning is logged if coverage falls below 90%, since new line items
+legitimately have no prior-year history.
 
-**4. No missing or negative amounts**
+**4. No missing or negative amounts** (critical)
 Budget and actual amounts must exist and be non-negative (except working
 capital, which can legitimately go negative). Catches corrupted or
 incomplete source files before they reach the calculation stage.
 
-**5. Every month has the same number of line items**
+**5. Every month has the same number of line items** (critical)
 If January has 23 rows and June has 18, five line items are missing from
 June. This check flags incomplete months so they do not look like zeros
 in the variance report.
@@ -96,9 +104,18 @@ The principle: a wrong report is worse than no report.
 
 ## How to run
 
+Requires Python 3.10 or later. CI runs the tests on Python 3.10 and 3.12,
+on both Windows and Linux.
+
 ```bash
-pip install pandas openpyxl
+pip install -r requirements.txt
 python run_pipeline.py
+```
+
+Run the tests:
+
+```bash
+python -m unittest discover tests
 ```
 
 ---
@@ -132,9 +149,15 @@ figures without any error message.
 
 **4-state variance status**
 Standard variance analysis uses Favorable and Unfavorable. This pipeline
-adds On Plan and Deviation for stable categories like headcount and
-working capital, where a small deviation is not inherently bad. The
-tolerance band is configurable in config.py (default ±2%).
+adds On Plan and Deviation for stable categories (headcount, capex and
+working capital), where a deviation is not inherently good or bad. The
+tolerance band is configurable in config.py (default ±2%). The
+is_favorable flag is derived from the status (Favorable or On Plan), so
+the two never disagree.
+
+**Unbudgeted spend stays visible**
+A line with a zero budget still gets a variance (actual minus zero) and
+can be flagged as material; only the percentage is left blank.
 
 **Append-only snapshot table**
 The variance_analysis table is wiped and rebuilt every run so it always
@@ -144,14 +167,22 @@ is idempotent — running it twice gives the same current result — while
 still enabling run-to-run comparison.
 
 **Fail-fast validation**
-Data quality checks run before any calculation. If checks fail, the
-pipeline stops with a clear message rather than producing silently wrong
-numbers.
+Data quality checks run before any calculation. If a critical check
+fails, the pipeline stops with a clear message rather than producing
+silently wrong numbers.
 
-**SQL over Python loops**
-All calculations push as much logic as possible into SQL rather than
-iterating in Python. The trend analysis and snapshot comparison use
-fully set-based single-pass SQL (LAG window functions and ROW_NUMBER).
+**Set-based SQL where it matters**
+The prior-year join, trend streak detection (LAG and a running SUM over
+window functions), and the financial risk metrics are computed in
+single SQL statements. Variance flags are applied in a Python loop over
+the joined rows so each business rule stays a small, testable function.
+The snapshot diff finds the previous run with ROW_NUMBER() and compares
+flagged items with Python set operations.
+
+**Volatility measured per line item**
+Volatility is the month-to-month coefficient of variation for each
+subcategory, so large and small lines in the same category (e.g.
+salaries and utilities) are not pooled together.
 
 ---
 
@@ -169,3 +200,9 @@ fully set-based single-pass SQL (LAG window functions and ROW_NUMBER).
 The `sample_output/` folder contains:
 - `variance_report.xlsx` — the formatted Excel board pack
 - `variance_commentary.txt` — the plain-English exceptions narrative
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
